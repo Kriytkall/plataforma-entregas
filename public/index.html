@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entregas · Mapa ao vivo (Gravataí/RS)</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #map { height: 100%; width: 100%; }
+    body { font-family: "Segoe UI", system-ui, sans-serif; }
+    #painel {
+      position: absolute; top: 16px; right: 16px; z-index: 1000;
+      width: 310px; background: #fff; border-radius: 12px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 16px; max-height: 92vh; overflow:auto;
+    }
+    #painel h1 { font-size: 18px; color: #2C5F2D; margin-bottom: 4px; }
+    #painel p.sub { font-size: 12px; color: #666; margin-bottom: 12px; }
+    .campo { margin: 10px 0; }
+    .campo label { font-size: 13px; font-weight: 600; color: #333; display:block; margin-bottom: 4px; }
+    .campo input[type=range] { width: 100%; }
+    #raioVal { color: #2C5F2D; font-weight: 700; }
+    .dica { font-size: 12px; color: #555; background: #EAF1E6; border-radius: 8px; padding: 8px 10px; margin: 10px 0; }
+    .legenda { font-size: 12px; margin-top: 10px; }
+    .legenda span { display:inline-flex; align-items:center; margin-right: 10px; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; display:inline-block; margin-right: 4px; border: 2px solid #fff; box-shadow: 0 0 0 1px #999; }
+    #resultados { margin-top: 12px; }
+    #resultados h2 { font-size: 14px; color: #2C5F2D; margin-bottom: 6px; }
+    .item { font-size: 13px; padding: 6px 8px; border-left: 3px solid #6FA56B; background: #f6f8f5; border-radius: 4px; margin-bottom: 5px; }
+    .item.vazio { border-color: #c2632f; color: #a33; }
+    .erro { color: #b00; font-size: 13px; background:#fde; padding:8px; border-radius:6px; }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <div id="painel">
+    <h1>🛵 Entregas — mapa ao vivo</h1>
+    <p class="sub">Gravataí/RS · dados reais do MongoDB Atlas</p>
+
+    <div class="dica">👉 Clique em um <b>restaurante</b> (🍽️) no mapa para encontrar os entregadores disponíveis por perto.</div>
+
+    <div class="campo">
+      <label>Raio de busca: <span id="raioVal">2000</span> m</label>
+      <input type="range" id="raio" min="500" max="5000" step="250" value="2000" />
+    </div>
+
+    <div class="campo">
+      <label style="font-weight:400;cursor:pointer;">
+        <input type="checkbox" id="aovivo" /> 🔴 Atualizar ao vivo (a cada 7s)
+      </label>
+    </div>
+
+    <div class="legenda">
+      <span><span class="dot" style="background:#2e9e4f"></span>Disponível</span>
+      <span><span class="dot" style="background:#999"></span>Ocupado</span><br>
+      <span><span class="dot" style="background:#e8821e"></span>Restaurante</span>
+      <span><span class="dot" style="background:#2b6cb0"></span>Cliente</span>
+    </div>
+
+    <div id="resultados"></div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
