@@ -147,4 +147,51 @@ async function atualizarTudo() {
   }
 }
 
+// ============================================================
+// MELHOR ROTA (Neo4j / grafo) - desenha o caminho do Dijkstra no mapa
+// ============================================================
+let camadaRota = L.layerGroup().addTo(map);   // polyline + paradas
+const btnRota = document.getElementById("btnRota");
+const rotaInfo = document.getElementById("rotaInfo");
+
+btnRota.addEventListener("click", tracarRota);
+
+async function tracarRota() {
+  btnRota.disabled = true;
+  btnRota.textContent = "Consultando o grafo...";
+  rotaInfo.innerHTML = "";
+  try {
+    const r = await fetch("/api/rota?origem=rest_010&destino=cli_077");
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.erro || "falha na rota");
+
+    camadaRota.clearLayers();
+
+    // Linha da rota: geometria REAL (segue as ruas do OpenStreetMap)
+    const pontos = data.geometria.map((p) => [p.lat, p.lng]);
+    L.polyline(pontos, { color: "#7B3FB5", weight: 5, opacity: 0.85 }).addTo(camadaRota);
+
+    // Marca so o inicio (restaurante) e o fim (cliente)
+    const extremos = [pontos[0], pontos[pontos.length - 1]];
+    extremos.forEach((p, i) => {
+      L.circleMarker(p, {
+        radius: 8, fillColor: "#6A2C8F", color: "#fff", weight: 2, fillOpacity: 1,
+      }).bindPopup(`<b>${i === 0 ? "Restaurante" : "Cliente"}</b>`).addTo(camadaRota);
+    });
+
+    map.fitBounds(L.polyline(pontos).getBounds(), { padding: [60, 60] });
+
+    // Painel: distancia + ruas reais percorridas + o Cypher usado (pra narrar no video)
+    let html = `<div><span class="total">${data.distancia_m} m</span> · ${data.ruas.length} ruas</div>`;
+    data.ruas.forEach((nome) => { html += `<div class="parada">${nome}</div>`; });
+    html += `<div id="cypherBox">${data.cypher}</div>`;
+    rotaInfo.innerHTML = html;
+  } catch (e) {
+    rotaInfo.innerHTML = `<div class="erro">Erro na rota: ${e.message}</div>`;
+  } finally {
+    btnRota.disabled = false;
+    btnRota.textContent = "🗺️ Traçar rota até o cliente (Dijkstra)";
+  }
+}
+
 carregarPontos();

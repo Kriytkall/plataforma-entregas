@@ -7,6 +7,7 @@ require("dotenv").config();
 const express = require("express");
 const path = require("path");
 const { MongoClient } = require("mongodb");
+const neo4j = require("neo4j-driver");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +21,18 @@ if (!URI) {
 
 const client = new MongoClient(URI);
 let db;
+
+// ------------------------------------------------------------
+// Neo4j Aura (grafo) - usado SO para a "melhor rota" (Dijkstra).
+// Persistencia poliglota: Mongo p/ geo + Neo4j p/ grafo.
+// ------------------------------------------------------------
+const neoDriver =
+  process.env.NEO4J_URI
+    ? neo4j.driver(
+        process.env.NEO4J_URI,
+        neo4j.auth.basic(process.env.NEO4J_USER, process.env.NEO4J_PASSWORD)
+      )
+    : null;
 
 // Serve o frontend (pasta public)
 app.use(express.static(path.join(__dirname, "public")));
@@ -71,6 +84,53 @@ app.get("/api/proximos", async (req, res) => {
 });
 
 // ------------------------------------------------------------
+// API 3 - MELHOR ROTA (Neo4j, grafo). Caminho de menor custo entre
+// dois pontos usando apoc.algo.dijkstra sobre as ruas (:RUA {peso}).
+// Parametros: ?origem=rest_010&destino=cli_077
+// Devolve a sequencia de paradas (lat/lng) e a distancia total em metros.
+// ------------------------------------------------------------
+const CYPHER_ROTA =
+  "MATCH (o:No {key:$origem}), (d:No {key:$destino})\n" +
+  "CALL apoc.algo.dijkstra(o, d, 'RUA>', 'peso') YIELD path, weight\n" +
+  "RETURN [n IN nodes(path) | {lat:n.lat, lng:n.lng}] AS geometria,\n" +
+  "       [rel IN relationships(path) | rel.nome] AS ruasSeq,\n" +
+  "       weight AS metros";
+
+app.get("/api/rota", async (req, res) => {
+  if (!neoDriver) {
+    return res.status(503).json({ erro: "Neo4j nao configurado (faltam variaveis NEO4J_*)." });
+  }
+  const origem = req.query.origem || "rest_010";
+  const destino = req.query.destino || "cli_077";
+  const session = neoDriver.session();
+  try {
+    const r = await session.run(CYPHER_ROTA, { origem, destino });
+    if (r.records.length === 0) {
+      return res.status(404).json({ erro: "Nenhuma rota encontrada entre os pontos." });
+    }
+    const rec = r.records[0];
+    // Lista de ruas distintas, na ordem em que sao percorridas (sem repetir e sem "(acesso)")
+    const ruas = [];
+    for (const nome of rec.get("ruasSeq")) {
+      if (nome === "(acesso)") continue;
+      if (ruas[ruas.length - 1] !== nome) ruas.push(nome);
+    }
+    res.json({
+      origem,
+      destino,
+      distancia_m: Math.round(rec.get("metros")),
+      ruas,                       // nomes reais das ruas, em ordem
+      geometria: rec.get("geometria"),  // pontos lat/lng p/ desenhar a linha
+      cypher: CYPHER_ROTA,        // enviado ao front so para exibir/explicar no video
+    });
+  } catch (e) {
+    res.status(500).json({ erro: e.message });
+  } finally {
+    await session.close();
+  }
+});
+
+// ------------------------------------------------------------
 // Inicia: conecta no Atlas e SO ENTAO sobe o servidor web
 // ------------------------------------------------------------
 async function start() {
@@ -79,6 +139,16 @@ async function start() {
     db = client.db(DB_NAME);
     await db.command({ ping: 1 });
     console.log("[OK] Conectado ao MongoDB Atlas (" + DB_NAME + ")");
+    if (neoDriver) {
+      try {
+        await neoDriver.getServerInfo();
+        console.log("[OK] Conectado ao Neo4j Aura (grafo / melhor rota)");
+      } catch (e) {
+        console.warn("[AVISO] Neo4j nao respondeu:", e.message, "- /api/rota ficara indisponivel.");
+      }
+    } else {
+      console.warn("[AVISO] NEO4J_* nao definido - /api/rota desativado (so MongoDB).");
+    }
     app.listen(PORT, () => {
       console.log("[OK] Plataforma no ar: http://localhost:" + PORT);
     });

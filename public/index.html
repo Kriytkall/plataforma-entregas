@@ -29,6 +29,21 @@
     .item { font-size: 13px; padding: 6px 8px; border-left: 3px solid #6FA56B; background: #f6f8f5; border-radius: 4px; margin-bottom: 5px; }
     .item.vazio { border-color: #c2632f; color: #a33; }
     .erro { color: #b00; font-size: 13px; background:#fde; padding:8px; border-radius:6px; }
+    /* --- Neo4j / melhor rota --- */
+    .secao-rota { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #ccc; }
+    .secao-rota h2 { font-size: 14px; color: #6A2C8F; margin-bottom: 6px; }
+    #btnRota {
+      width: 100%; padding: 9px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+      color: #fff; background: #7B3FB5; border: none; border-radius: 8px;
+    }
+    #btnRota:hover { background: #6A2C8F; }
+    #btnRota:disabled { background: #b9a3cc; cursor: default; }
+    #rotaInfo { font-size: 13px; margin-top: 8px; }
+    #rotaInfo .total { font-weight: 700; color: #6A2C8F; }
+    .parada { font-size: 12px; padding: 4px 8px; border-left: 3px solid #9B59B6;
+      background: #f6f1fa; border-radius: 4px; margin: 4px 0; }
+    #cypherBox { font-family: Consolas, monospace; font-size: 11px; color: #444;
+      background: #f3eef8; border-radius: 6px; padding: 8px; margin-top: 8px; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -58,6 +73,12 @@
     </div>
 
     <div id="resultados"></div>
+
+    <div class="secao-rota">
+      <h2>🟣 Melhor rota (Neo4j · grafo)</h2>
+      <button id="btnRota">🗺️ Traçar rota até o cliente (Dijkstra)</button>
+      <div id="rotaInfo"></div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
