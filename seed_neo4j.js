@@ -19,8 +19,9 @@ require("dotenv").config();
 const fs = require("fs");
 const neo4j = require("neo4j-driver");
 
-// Caixa (bbox) ao redor do restaurante -> cliente, com folga
-const BBOX = { S: -29.9525, W: -51.0030, N: -29.9405, E: -50.9880 };
+// Caixa (bbox) cobrindo a area central de Gravatai (~4,5 km) - grande o
+// suficiente para que QUALQUER entregador espalhado seja roteavel.
+const BBOX = { S: -29.9720, W: -51.0180, N: -29.9280, E: -50.9680 };
 // Pontos reais (mesmas coordenadas do MongoDB)
 const REST = { id: "rest_010", nome: "Cantina do Gaúcho", lat: -29.9442, lng: -50.9925 };
 const CLI  = { id: "cli_077",  nome: "Ana Lima",          lat: -29.9480, lng: -50.9980 };
@@ -47,26 +48,39 @@ async function baixarOSM() {
     console.log("[OSM] usando cache local:", CACHE);
     return JSON.parse(fs.readFileSync(CACHE, "utf8"));
   }
-  const q = `[out:json][timeout:60];
+  const q = `[out:json][timeout:90];
 way["highway"~"^(primary|secondary|tertiary|residential|unclassified|living_street|trunk|road|tertiary_link|secondary_link)$"](${BBOX.S},${BBOX.W},${BBOX.N},${BBOX.E});
 (._;>;);
 out body;`;
+  const endpoints = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+  ];
   console.log("[OSM] baixando malha viaria de Gravatai (Overpass)...");
-  const r = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    body: "data=" + encodeURIComponent(q),
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": "TrabalhoBD-Cenario3/1.0 (uso academico)",
-    },
-  });
-  const txt = await r.text();
-  if (!txt.trim().startsWith("{")) {
-    throw new Error("Overpass nao retornou JSON: " + txt.slice(0, 120));
+  for (const url of endpoints) {
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        body: "data=" + encodeURIComponent(q),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "TrabalhoBD-Cenario3/1.0 (uso academico)",
+        },
+      });
+      const txt = await r.text();
+      if (!txt.trim().startsWith("{")) {
+        console.log(`[OSM] ${url} nao retornou JSON (status ${r.status}), tentando proximo...`);
+        continue;
+      }
+      fs.writeFileSync(CACHE, txt);
+      console.log("[OSM] baixado de", url, "e salvo em", CACHE);
+      return JSON.parse(txt);
+    } catch (e) {
+      console.log(`[OSM] falha em ${url}: ${e.message}, tentando proximo...`);
+    }
   }
-  fs.writeFileSync(CACHE, txt);
-  console.log("[OSM] baixado e salvo em", CACHE);
-  return JSON.parse(txt);
+  throw new Error("Nenhum endpoint do Overpass respondeu.");
 }
 
 // ---- 2) Constroi o grafo (nos + arestas) a partir do OSM ----

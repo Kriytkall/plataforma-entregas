@@ -22,6 +22,8 @@ let camadaFixos = L.layerGroup().addTo(map);
 let circuloBusca = null;
 
 let cacheEntregadores = [];          // todos os entregadores (pra nao buscar de novo a cada ajuste)
+let cacheRestaurantes = [];          // usados para escolher destino da rota
+let cacheClientes = [];
 let restauranteSelecionado = null;   // {lng, lat, nome} do ultimo restaurante clicado
 
 const raioInput = document.getElementById("raio");
@@ -56,6 +58,8 @@ async function carregarPontos() {
     const { entregadores, restaurantes, clientes } = await r.json();
 
     cacheEntregadores = entregadores;   // guarda pra reusar nas buscas
+    cacheRestaurantes = restaurantes;
+    cacheClientes = clientes;
     camadaFixos.clearLayers();
     camadaEntregadores.clearLayers();
 
@@ -89,10 +93,12 @@ function desenharEntregadores(lista, destacarIds = []) {
     const [lat, lng] = latlng(ent);
     const cor = ent.status === "disponivel" ? COR.disponivel : COR.ocupado;
     const destaque = destacarIds.includes(ent._id);
-    bolinha(lat, lng, cor, destaque ? 13 : 9)
+    const m = bolinha(lat, lng, cor, destaque ? 13 : 9)
       .bindPopup(`🛵 <b>${ent.nome}</b><br>${ent.veiculo} · ${ent.status}` +
-                 (ent.distancia_m != null ? `<br>${Math.round(ent.distancia_m)} m` : ""))
+                 (ent.distancia_m != null ? `<br>${Math.round(ent.distancia_m)} m` : "") +
+                 `<br><i>clique para traçar a rota</i>`)
       .addTo(camadaEntregadores);
+    m.on("click", () => tracarRotaEntregador(ent));
   });
 }
 
@@ -148,49 +154,83 @@ async function atualizarTudo() {
 }
 
 // ============================================================
-// MELHOR ROTA (Neo4j / grafo) - desenha o caminho do Dijkstra no mapa
+// MELHOR ROTA (Neo4j / grafo) - clique num ENTREGADOR para tracar a rota
+// completa dele: entregador -> restaurante -> cliente (2 pernas de Dijkstra).
 // ============================================================
-let camadaRota = L.layerGroup().addTo(map);   // polyline + paradas
-const btnRota = document.getElementById("btnRota");
+let camadaRota = L.layerGroup().addTo(map);
+const btnLimparRota = document.getElementById("btnLimparRota");
 const rotaInfo = document.getElementById("rotaInfo");
 
-btnRota.addEventListener("click", tracarRota);
-
-async function tracarRota() {
-  btnRota.disabled = true;
-  btnRota.textContent = "Consultando o grafo...";
+btnLimparRota.addEventListener("click", () => {
+  camadaRota.clearLayers();
   rotaInfo.innerHTML = "";
+});
+
+// distancia aprox. em metros (Haversine) - so para escolher o ponto mais proximo
+function metros(a, b) {
+  const R = 6371000, toRad = (g) => (g * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function coordDe(doc) { const [lng, lat] = doc.local.coordinates; return { lng, lat }; }
+function maisProximo(pt, lista) {
+  let best = null, bd = Infinity;
+  lista.forEach((d) => { const dd = metros(pt, coordDe(d)); if (dd < bd) { bd = dd; best = d; } });
+  return best;
+}
+
+async function tracarRotaEntregador(ent) {
+  const e = coordDe(ent);
+  // restaurante destino: o selecionado (se houver) ou o mais proximo do entregador
+  let rest, restNome;
+  if (restauranteSelecionado) {
+    rest = { lng: restauranteSelecionado.lng, lat: restauranteSelecionado.lat };
+    restNome = restauranteSelecionado.nome;
+  } else {
+    const rd = maisProximo(e, cacheRestaurantes);
+    rest = coordDe(rd); restNome = rd.nome;
+  }
+  // cliente: o mais proximo do restaurante
+  const cd = maisProximo(rest, cacheClientes);
+  const cli = coordDe(cd);
+
+  rotaInfo.innerHTML = `<div>Consultando o grafo (Dijkstra)...</div>`;
+  const pts = `${e.lng},${e.lat};${rest.lng},${rest.lat};${cli.lng},${cli.lat}`;
   try {
-    const r = await fetch("/api/rota?origem=rest_010&destino=cli_077");
+    const r = await fetch(`/api/rota?pts=${pts}`);
     const data = await r.json();
     if (!r.ok) throw new Error(data.erro || "falha na rota");
 
     camadaRota.clearLayers();
 
-    // Linha da rota: geometria REAL (segue as ruas do OpenStreetMap)
+    // Linha da rota (geometria real, segue as ruas)
     const pontos = data.geometria.map((p) => [p.lat, p.lng]);
     L.polyline(pontos, { color: "#7B3FB5", weight: 5, opacity: 0.85 }).addTo(camadaRota);
 
-    // Marca so o inicio (restaurante) e o fim (cliente)
-    const extremos = [pontos[0], pontos[pontos.length - 1]];
-    extremos.forEach((p, i) => {
-      L.circleMarker(p, {
-        radius: 8, fillColor: "#6A2C8F", color: "#fff", weight: 2, fillOpacity: 1,
-      }).bindPopup(`<b>${i === 0 ? "Restaurante" : "Cliente"}</b>`).addTo(camadaRota);
-    });
+    // Marcadores dos 3 pontos: saida, coleta, entrega
+    L.circleMarker([e.lat, e.lng], { radius: 9, fillColor: "#6A2C8F", color: "#fff", weight: 2, fillOpacity: 1 })
+      .bindPopup(`🛵 <b>${ent.nome}</b> (saída)`).addTo(camadaRota);
+    L.circleMarker([rest.lat, rest.lng], { radius: 9, fillColor: COR.restaurante, color: "#fff", weight: 2, fillOpacity: 1 })
+      .bindPopup(`🍽️ <b>${restNome}</b> (coleta)`).addTo(camadaRota);
+    L.circleMarker([cli.lat, cli.lng], { radius: 9, fillColor: COR.cliente, color: "#fff", weight: 2, fillOpacity: 1 })
+      .bindPopup(`🏠 <b>${cd.nome}</b> (entrega)`).addTo(camadaRota);
 
     map.fitBounds(L.polyline(pontos).getBounds(), { padding: [60, 60] });
 
-    // Painel: distancia + ruas reais percorridas + o Cypher usado (pra narrar no video)
-    let html = `<div><span class="total">${data.distancia_m} m</span> · ${data.ruas.length} ruas</div>`;
-    data.ruas.forEach((nome) => { html += `<div class="parada">${nome}</div>`; });
+    // Painel: trajeto + distancias por perna + ruas + o Cypher
+    const leg1 = data.legs && data.legs[0] ? data.legs[0].metros : null;
+    const leg2 = data.legs && data.legs[1] ? data.legs[1].metros : null;
+    let html = `<div><b>🛵 ${ent.nome} → 🍽️ ${restNome} → 🏠 ${cd.nome}</b></div>`;
+    html += `<div><span class="total">${(data.distancia_m / 1000).toFixed(2)} km</span> no total</div>`;
+    if (leg1 != null) html += `<div class="parada">Entregador → Restaurante: ${leg1} m</div>`;
+    if (leg2 != null) html += `<div class="parada">Restaurante → Cliente: ${leg2} m</div>`;
+    html += `<div style="margin-top:6px;font-size:12px;color:#555">Ruas: ${data.ruas.join(" · ")}</div>`;
     html += `<div id="cypherBox">${data.cypher}</div>`;
     rotaInfo.innerHTML = html;
-  } catch (e) {
-    rotaInfo.innerHTML = `<div class="erro">Erro na rota: ${e.message}</div>`;
-  } finally {
-    btnRota.disabled = false;
-    btnRota.textContent = "🗺️ Traçar rota até o cliente (Dijkstra)";
+  } catch (err) {
+    rotaInfo.innerHTML = `<div class="erro">Erro na rota: ${err.message}</div>`;
   }
 }
 

@@ -32,12 +32,11 @@
     /* --- Neo4j / melhor rota --- */
     .secao-rota { margin-top: 14px; padding-top: 12px; border-top: 1px dashed #ccc; }
     .secao-rota h2 { font-size: 14px; color: #6A2C8F; margin-bottom: 6px; }
-    #btnRota {
-      width: 100%; padding: 9px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
-      color: #fff; background: #7B3FB5; border: none; border-radius: 8px;
+    #btnLimparRota {
+      width: 100%; padding: 8px 10px; font-size: 13px; font-weight: 600; cursor: pointer;
+      color: #6A2C8F; background: #f3eef8; border: 1px solid #d9c9e8; border-radius: 8px;
     }
-    #btnRota:hover { background: #6A2C8F; }
-    #btnRota:disabled { background: #b9a3cc; cursor: default; }
+    #btnLimparRota:hover { background: #e9dff3; }
     #rotaInfo { font-size: 13px; margin-top: 8px; }
     #rotaInfo .total { font-weight: 700; color: #6A2C8F; }
     .parada { font-size: 12px; padding: 4px 8px; border-left: 3px solid #9B59B6;
@@ -76,7 +75,8 @@
 
     <div class="secao-rota">
       <h2>🟣 Melhor rota (Neo4j · grafo)</h2>
-      <button id="btnRota">🗺️ Traçar rota até o cliente (Dijkstra)</button>
+      <p class="dica" style="margin:0 0 8px">🛵 Clique num <b>entregador</b> para traçar a rota dele: <b>entregador → restaurante → cliente</b>.</p>
+      <button id="btnLimparRota">🧹 Limpar rota</button>
       <div id="rotaInfo"></div>
     </div>
   </div>

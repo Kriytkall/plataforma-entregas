@@ -89,9 +89,16 @@ app.get("/api/proximos", async (req, res) => {
 // Parametros: ?origem=rest_010&destino=cli_077
 // Devolve a sequencia de paradas (lat/lng) e a distancia total em metros.
 // ------------------------------------------------------------
-const CYPHER_ROTA =
-  "MATCH (o:No {key:$origem}), (d:No {key:$destino})\n" +
-  "CALL apoc.algo.dijkstra(o, d, 'RUA>', 'peso') YIELD path, weight\n" +
+// Uma PERNA da rota: encaixa origem e destino (coordenadas livres) no
+// cruzamento real mais proximo (point.distance) e roda o Dijkstra entre eles.
+const CYPHER_LEG =
+  "WITH point({latitude:$fromLat, longitude:$fromLng}) AS pa,\n" +
+  "     point({latitude:$toLat,   longitude:$toLng})   AS pb\n" +
+  "MATCH (a:No) WHERE a.lat IS NOT NULL\n" +
+  "WITH pa, pb, a ORDER BY point.distance(pa, point({latitude:a.lat, longitude:a.lng})) ASC LIMIT 1\n" +
+  "MATCH (b:No) WHERE b.lat IS NOT NULL\n" +
+  "WITH pa, pb, a, b ORDER BY point.distance(pb, point({latitude:b.lat, longitude:b.lng})) ASC LIMIT 1\n" +
+  "CALL apoc.algo.dijkstra(a, b, 'RUA>', 'peso') YIELD path, weight\n" +
   "RETURN [n IN nodes(path) | {lat:n.lat, lng:n.lng}] AS geometria,\n" +
   "       [rel IN relationships(path) | rel.nome] AS ruasSeq,\n" +
   "       weight AS metros";
@@ -100,28 +107,58 @@ app.get("/api/rota", async (req, res) => {
   if (!neoDriver) {
     return res.status(503).json({ erro: "Neo4j nao configurado (faltam variaveis NEO4J_*)." });
   }
-  const origem = req.query.origem || "rest_010";
-  const destino = req.query.destino || "cli_077";
+  // pts = "lng,lat;lng,lat;..." (2 ou mais pontos). Sem pts: restaurante -> cliente.
+  let pts;
+  if (req.query.pts) {
+    pts = req.query.pts.split(";")
+      .map((s) => s.split(",").map(Number))
+      .filter((p) => p.length === 2 && p.every((n) => !Number.isNaN(n)));
+  } else {
+    pts = [[-50.9925, -29.9442], [-50.9980, -29.9480]]; // rest_010 -> cli_077 [lng,lat]
+  }
+  if (pts.length < 2) {
+    return res.status(400).json({ erro: "Informe pelo menos 2 pontos (pts=lng,lat;lng,lat)." });
+  }
+
   const session = neoDriver.session();
   try {
-    const r = await session.run(CYPHER_ROTA, { origem, destino });
-    if (r.records.length === 0) {
-      return res.status(404).json({ erro: "Nenhuma rota encontrada entre os pontos." });
-    }
-    const rec = r.records[0];
-    // Lista de ruas distintas, na ordem em que sao percorridas (sem repetir e sem "(acesso)")
+    let geometria = [];
     const ruas = [];
-    for (const nome of rec.get("ruasSeq")) {
-      if (nome === "(acesso)") continue;
-      if (ruas[ruas.length - 1] !== nome) ruas.push(nome);
+    const legs = [];
+    let metrosTotal = 0;
+
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [fromLng, fromLat] = pts[i];
+      const [toLng, toLat] = pts[i + 1];
+      const r = await session.run(CYPHER_LEG, { fromLat, fromLng, toLat, toLng });
+      if (r.records.length === 0) {
+        return res.status(404).json({ erro: "Nenhuma rota encontrada entre os pontos." });
+      }
+      const rec = r.records[0];
+      const geo = rec.get("geometria");
+      // nao duplica o ponto de juncao entre pernas
+      if (geometria.length > 0 && geo.length > 0) geo.shift();
+      geometria = geometria.concat(geo);
+      for (const nome of rec.get("ruasSeq")) {
+        if (nome === "(acesso)") continue;
+        if (ruas[ruas.length - 1] !== nome) ruas.push(nome);
+      }
+      const metros = rec.get("metros");
+      metrosTotal += metros;
+      legs.push({ metros: Math.round(metros) });
     }
+
+    // faz a linha tocar exatamente o ponto inicial (entregador) e final (cliente)
+    const first = pts[0], last = pts[pts.length - 1];
+    geometria.unshift({ lat: first[1], lng: first[0] });
+    geometria.push({ lat: last[1], lng: last[0] });
+
     res.json({
-      origem,
-      destino,
-      distancia_m: Math.round(rec.get("metros")),
-      ruas,                       // nomes reais das ruas, em ordem
-      geometria: rec.get("geometria"),  // pontos lat/lng p/ desenhar a linha
-      cypher: CYPHER_ROTA,        // enviado ao front so para exibir/explicar no video
+      distancia_m: Math.round(metrosTotal),
+      ruas,            // nomes reais das ruas, em ordem
+      geometria,       // pontos lat/lng p/ desenhar a linha (segue as ruas)
+      legs,            // distancia de cada perna (ex.: ent->rest, rest->cli)
+      cypher: CYPHER_LEG,
     });
   } catch (e) {
     res.status(500).json({ erro: e.message });
